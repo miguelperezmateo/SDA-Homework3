@@ -11,10 +11,11 @@ library("xlsx")
 library("fUnitRoots")
 library("MTS")
 
+setwd(dirname(rstudioapi::getSourceEditorContext()$path))
 # Read data and convert to time series ----
 ## Data => Monthly based recording of Subsidised housing approvals as
 ## % of totals from January 1990 to December 2007.
-data <- read.xlsx(file = "./dataset/data_g15.xlsx", sheetIndex = 1)
+data <- read.xlsx(file = "../dataset/data_g15.xlsx", sheetIndex = 1)
 subsidised_house_approvals <- data[, 2]
 time_series <- ts(subsidised_house_approvals, frequency = 12, start = c(1990, 1))
 log_time_series <- log(time_series)
@@ -198,6 +199,7 @@ monthplot(time_series_quaterly) # Here we can see that a pattern repeats all qua
 
 acf(time_series)
 pacf(time_series)
+acf2(time_series)
 
 ndiffs(time_series) # only 1 difference needed to make the time serie stationary
 # We have to say that this is not true empirically... When tested an arima model,
@@ -205,17 +207,21 @@ ndiffs(time_series) # only 1 difference needed to make the time serie stationary
 
 nsdiffs(time_series) # no difference required fo a seasonally stationary serie (because it is!)
 
+sd(time_series)
 adf.test(x = time_series) # Null hypothesis non stationary, obtianed p-value >0.05
 kpss.test(x = time_series) # p-value < 0.05, null hypothesis is Stationary
 
 time_series_stationary <- diff(time_series, differences = 1)
 
 # With one diff pass both test
+sd(time_series_stationary)
 adf.test(x = time_series_stationary) # Null hypothesis non stationary, obtianed p-value >0.05
 kpss.test(x = time_series_stationary) # p-value < 0.05, null hypothesis is Stationary
 
 # ACF improved a lot
 acf(time_series_stationary)
+acf2(time_series_stationary)
+
 plot(time_series_stationary)
 
 # With d = 1, we obtain a stationary data, so we do not need a higher d.
@@ -273,6 +279,7 @@ getrmse <- function(x, h, ...)
   train <- window(x, end = train_end) #extract train data
   test <- window(x, start = test_start)  #extract test data
   fit <- Arima(train, ...) # fit model with train data
+  print(paste(" AIC:",fit$aicc)) # the complexity of model
   fc <- forecast(fit, h = h) # forecast with model
   return(accuracy(fc, test)[2, "RMSE"]) #compare forecast with test data, extract the rmse
 }
@@ -291,6 +298,7 @@ permutate_get_rmse <- function(data, p_arr, P_arr, q_arr, Q_arr) {
           print(paste(combination, " = ", rmse))
 
           ## Save best combination
+          # t-test/box-test,aicc,cov2cor?
           if (rmse < best_combination_rmse) {
             assign("best_combination", combination, envir = .GlobalEnv)
             assign("best_combination_rmse", rmse, envir = .GlobalEnv)
@@ -332,20 +340,33 @@ final_model_log_residuals_transformed <- exp(final_model_log$residuals)
 plot(final_model$residuals)
 plot(final_model_log_residuals_transformed)
 
-t.test(final_model$residuals) # p-value is <>> 0.05 => true mean != 0
-t.test(final_model_log_residuals_transformed) # p-value is > 0.05 =>  true mean == 0
+# some grahics for models
+final_model.sarima=sarima(time_series_train_split,1,1,0,3,0,1,12)
+final_model_log.sarima=sarima(time_series_train_split,1,1,1,1,0,0,12)
 
-Box.test(final_model$residuals, lag = 20, fitdf = 5, type = "L")
-Box.test(final_model_log_residuals_transformed, lag = 20, fitdf = 5, type = "L")
+final_model$aicc
+final_model_log$aicc
+cov2cor(final_model$var.coef)
+cov2cor(final_model_log$var.coef)
+
+t.test(final_model$residuals) # p-value is <<> 0.05 => true mean != 0
+t.test(final_model_log_residuals_transformed) # p-value is < 0.05 =>  true mean != 0
+t.test(final_model_log$residuals) # =0
+
+Box.test(final_model$residuals, lag = 20, fitdf = 5, type = "L") #small -> dependence
+Box.test(final_model_log_residuals_transformed, lag = 20, fitdf = 5, type = "L") #large -> independence
+Box.test(final_model_log$residuals,lag = 20, fitdf = 5, type = "L")
 
 checkresiduals(final_model) # Here we can see nicely that residuals are mean 0 and normal variance
 
 final_model_log_temp <- final_model_log
 final_model_log_temp$residuals <- exp(final_model_log_temp$residuals)
 checkresiduals(final_model_log_temp)
+checkresiduals(final_model_log)
 
 acf2(final_model$residuals)
 acf2(final_model_log_residuals_transformed) # Much less correlation in acf
+acf2(final_model_log$residuals)
 
 # f ) Once you have found a suitable model, repeating the fitting model process several
 # times if necessary, use it to make forecasts. Plot them.
@@ -384,6 +405,7 @@ accuracy(forecast_automatic_arima_model, time_series_test_split)
 
 Box.test(automatic_arima_model$residuals, 12, fitdf = 1)
 t.test(automatic_arima_model$residuals)
+checkresiduals(automatic_arima_model$residuals)
 jarque.bera.test(automatic_arima_model$residuals[-c(49, 72, 73, 37, 77)])
 
 # The spectrum of the residuals:s
